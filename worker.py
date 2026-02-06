@@ -4,10 +4,11 @@ import random
 import concurrent.futures
 import logging
 import datetime
-from playwright.sync_api import Playwright, sync_playwright, expect  # Updated Import
+import os
+from playwright.sync_api import Playwright, sync_playwright, expect
 
-# Configuration
-DB_NAME = "scans.db"
+# --- CONFIGURATION ---
+DB_FILE_PATH = "scans.db"  # Path to your database
 POLL_INTERVAL = 5
 
 # Logging Setup
@@ -15,7 +16,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - WORKER - %(message
 
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_NAME)
+    """Standard SQLite connection."""
+    conn = sqlite3.connect(DB_FILE_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -39,6 +41,12 @@ def ensure_settings_column():
             cursor.execute("ALTER TABLE settings ADD COLUMN random_delta_delay INTEGER DEFAULT 0")
         if 'random_delta_timeout' not in columns:
             cursor.execute("ALTER TABLE settings ADD COLUMN random_delta_timeout INTEGER DEFAULT 0")
+        if 'scan_interval' not in columns:
+            cursor.execute("ALTER TABLE settings ADD COLUMN scan_interval INTEGER DEFAULT 500")
+        if 'error_cooldown' not in columns:
+            cursor.execute("ALTER TABLE settings ADD COLUMN error_cooldown INTEGER DEFAULT 3000")
+        if 'success_cooldown' not in columns:
+            cursor.execute("ALTER TABLE settings ADD COLUMN success_cooldown INTEGER DEFAULT 3000")
 
         conn.commit()
         conn.close()
@@ -109,20 +117,17 @@ def get_message(percent_msg, percent_special):
 
 
 # --- PROCESSING LOGIC ---
-def process_valid_code(code, base_delay, delta_delay, base_timeout, delta_timeout, message):
+def process_valid_code(code, delay_ms, delay_delta_ms, timeout_s, timeout_delta_s, message):
     """
     Main automation function using Playwright.
+    Calculates random values internally.
     """
+    # 1. Calculate random values locally
+    used_delay_delta = random.randint(0, delay_delta_ms)
+    used_timeout_delta = random.randint(0, timeout_delta_s)
 
-    # Calculate actual parameters
-    actual_delay = base_delay + random.randint(0, delta_delay)
-    actual_timeout = base_timeout + random.randint(0, delta_timeout)
-
-    logging.info(f"--> START Processing: {code}")
-    logging.info(
-        f"    Params: BaseDelay={base_delay}ms (Delta={delta_delay}), BaseTimeout={base_timeout}s (Delta={delta_timeout})")
-    logging.info(f"    Actual Used: Delay={actual_delay}ms, Timeout={actual_timeout}s")
-    logging.info(f"    Message: '{message}'")
+    actual_delay = delay_ms + used_delay_delta
+    actual_timeout = timeout_s + used_timeout_delta
 
     # ----------------------------------------------------
     # PLAYWRIGHT AUTOMATION LOGIC GOES HERE
@@ -131,35 +136,32 @@ def process_valid_code(code, base_delay, delta_delay, base_timeout, delta_timeou
     # with sync_playwright() as p:
     #     browser = p.chromium.launch(headless=True)
     #     page = browser.new_page()
-    #     # Use expect(page.locator(...)).to_be_visible()
     #     # ... actions ...
     #     browser.close()
 
-    # Simulation for now
+    # Simulation
     time.sleep(random.uniform(1.0, 3.0))
-
-    # Simulate error for testing if needed
-    # if random.randint(1, 10) > 8: raise Exception("Random Playwright Error")
-
     return True
 
 
 def worker_task(scan_id, code):
     """
-    Refetches settings immediately to ensure freshness, then processes.
-    Catches errors from process_valid_code and saves them to DB.
+    Refetches settings, processes code, and logs result.
     """
     try:
         # 1. REFETCH SETTINGS
         settings = get_settings()
 
-        # 2. Get Message
+        # 2. GET MESSAGE
         msg_text, _ = get_message(settings['percent_message'], settings['percent_special'])
 
         success = False
         error_msg = None
 
-        # 3. Run Process with Error Handling
+        # Minimal Start Log
+        logging.info(f"START {code}")
+
+        # 3. RUN PROCESS (Passed raw config values)
         try:
             success = process_valid_code(
                 code,
@@ -172,9 +174,9 @@ def worker_task(scan_id, code):
         except Exception as process_error:
             success = False
             error_msg = f"worker error:{str(process_error)}"
-            logging.error(f"Process failed for {code}: {process_error}")
+            logging.error(f"FAILED {code} | Error: {process_error}")
 
-        # 4. Update DB (Including Error Message)
+        # 4. UPDATE DB
         conn = get_db_connection()
         conn.execute("""
                      UPDATE scans
@@ -186,8 +188,11 @@ def worker_task(scan_id, code):
         conn.commit()
         conn.close()
 
-        status_log = "Success" if success else f"Failed ({error_msg})"
-        logging.info(f"<-- DONE Processing: {code} | {status_log}")
+        # Compact Success Log (Logs the Range Config since exact delta is internal)
+        if success:
+            msg_status = f"Msg: '{msg_text}'" if msg_text else "No Msg"
+            logging.info(
+                f"DONE {code} | OK | {settings['base_delay']}ms~{settings['delta_delay']} / {settings['base_timeout']}s~{settings['delta_timeout']} | {msg_status}")
 
     except Exception as e:
         logging.error(f"Critical Worker Task Error on ID {scan_id}: {e}")
@@ -195,7 +200,7 @@ def worker_task(scan_id, code):
 
 def main():
     ensure_settings_column()
-    logging.info("Worker started.")
+    logging.info(f"Worker started. Using DB at: {os.path.abspath(DB_FILE_PATH)}")
 
     while True:
         try:
@@ -209,12 +214,12 @@ def main():
             if pending_count > 0:
                 settings = get_settings()
 
-                # Logic: 1 thread per 10 codes, clamped by max_threads (Range 1-3)
+                # Logic: 1 thread per 10 codes, clamped by max_threads (Range 1-5)
                 calc_threads = (pending_count // 10) + 1
-                max_threads = max(1, min(3, settings['max_threads']))
+                max_threads = max(1, min(5, settings['max_threads']))
                 num_threads = min(calc_threads, max_threads)
 
-                logging.info(f"Pending: {pending_count}. Threads: {num_threads} (Max allowed: {max_threads})")
+                logging.info(f"Pending: {pending_count} | Threads: {num_threads}")
 
                 batch = pending[:num_threads]
 

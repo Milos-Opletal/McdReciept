@@ -36,7 +36,7 @@ def init_db():
                           enabled     BOOLEAN DEFAULT 1
                       )''')
 
-    # Updated Settings Table
+    # Updated Settings Table with ALL Configs
     cursor.execute('''
                    CREATE TABLE IF NOT EXISTS settings
                    (
@@ -47,7 +47,10 @@ def init_db():
                        time_between_questions_ms INTEGER DEFAULT 2000,
                        end_time_s                INTEGER DEFAULT 60,
                        random_delta_delay        INTEGER DEFAULT 0,
-                       random_delta_timeout      INTEGER DEFAULT 0
+                       random_delta_timeout      INTEGER DEFAULT 0,
+                       scan_interval             INTEGER DEFAULT 500,
+                       error_cooldown            INTEGER DEFAULT 3000,
+                       success_cooldown          INTEGER DEFAULT 3000
                    )
                    ''')
 
@@ -55,23 +58,24 @@ def init_db():
     if cursor.fetchone()[0] == 0:
         cursor.execute(
             '''INSERT INTO settings (id, percent_message, percent_special, max_threads, time_between_questions_ms,
-                                     end_time_s, random_delta_delay, random_delta_timeout)
-                          VALUES (1, 50, 10, 3, 2000, 60, 0, 0)''')
+                                     end_time_s, random_delta_delay, random_delta_timeout, scan_interval, error_cooldown, success_cooldown)
+                          VALUES (1, 50, 10, 3, 2000, 60, 0, 0, 500, 3000, 3000)''')
     else:
-        # Migration for new columns
+        # Migration: Add new columns if missing
         cursor.execute("PRAGMA table_info(settings)")
         cols = [c[1] for c in cursor.fetchall()]
-        if 'random_delta_delay' not in cols:
-            cursor.execute("ALTER TABLE settings ADD COLUMN random_delta_delay INTEGER DEFAULT 0")
-        if 'random_delta_timeout' not in cols:
-            cursor.execute("ALTER TABLE settings ADD COLUMN random_delta_timeout INTEGER DEFAULT 0")
+        if 'scan_interval' not in cols: cursor.execute("ALTER TABLE settings ADD COLUMN scan_interval INTEGER DEFAULT 500")
+        if 'error_cooldown' not in cols: cursor.execute("ALTER TABLE settings ADD COLUMN error_cooldown INTEGER DEFAULT 3000")
+        if 'success_cooldown' not in cols: cursor.execute("ALTER TABLE settings ADD COLUMN success_cooldown INTEGER DEFAULT 3000")
+        # Ensure previous columns exist too (just in case)
+        if 'max_threads' not in cols: cursor.execute("ALTER TABLE settings ADD COLUMN max_threads INTEGER DEFAULT 3")
 
     conn.commit()
     conn.close()
 
 init_db()
 
-# --- HELPER: TIME RANGES (Unchanged) ---
+# --- HELPER: TIME RANGES ---
 def get_shift_bounds(dt):
     h = dt.hour; date_part = dt.date()
     if 6 <= h < 14: return datetime.datetime.combine(date_part, datetime.time(6,0)), datetime.datetime.combine(date_part, datetime.time(13,59,59))
@@ -84,7 +88,7 @@ def get_time_range(filter_type):
     now = datetime.datetime.now()
     if filter_type == 'month': return now.replace(day=1, hour=0, minute=0, second=0), now.replace(hour=23, minute=59, second=59)
     elif filter_type == 'this_shift': return get_shift_bounds(now)
-    elif filter_type == 'last_shift': return get_shift_bounds(now - timedelta(hours=8)) # approx check, using get_shift_bounds logic is safer in full code
+    elif filter_type == 'last_shift': return get_shift_bounds(now - timedelta(hours=8))
     elif filter_type == 'yesterday': y = now - timedelta(days=1); return y.replace(hour=0,minute=0,second=0), y.replace(hour=23,minute=59,second=59)
     else: return now.replace(hour=0,minute=0,second=0), now.replace(hour=23,minute=59,second=59)
 
@@ -155,11 +159,20 @@ def handle_settings():
     if request.method == 'GET':
         row = conn.execute('SELECT * FROM settings WHERE id = 1').fetchone()
         conn.close()
-        return jsonify(dict(row))
+        # Fallback defaults if new columns are None (migration safety)
+        d = dict(row)
+        return jsonify(d)
+
     d = request.json
     conn.execute('''UPDATE settings SET
-                                        percent_message=?, percent_special=?, max_threads=?, time_between_questions_ms=?, end_time_s=?, random_delta_delay=?, random_delta_timeout=?
-                    WHERE id = 1''', (d['percent_message'], d['percent_special'], d.get('max_threads', 3), d.get('time_between_questions_ms', 2000), d.get('end_time_s', 60), d.get('random_delta_delay', 0), d.get('random_delta_timeout', 0)))
+                                        percent_message=?, percent_special=?, max_threads=?, time_between_questions_ms=?, end_time_s=?, random_delta_delay=?, random_delta_timeout=?,
+                                        scan_interval=?, error_cooldown=?, success_cooldown=?
+                    WHERE id = 1''', (
+                     d['percent_message'], d['percent_special'], d.get('max_threads', 3),
+                     d.get('time_between_questions_ms', 2000), d.get('end_time_s', 60),
+                     d.get('random_delta_delay', 0), d.get('random_delta_timeout', 0),
+                     d.get('scan_interval', 500), d.get('error_cooldown', 3000), d.get('success_cooldown', 3000)
+                 ))
     conn.commit(); conn.close()
     return jsonify({'success': True})
 
@@ -191,4 +204,4 @@ def update_message(id):
     return jsonify({'success': True})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=True, ssl_context='adhoc')
+    app.run(host='0.0.0.0', port=5000, debug=True)
