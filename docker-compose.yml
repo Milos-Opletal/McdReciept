@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  web:
+    image: mcd_qr
+    container_name: mcd_scanner_web
+    restart: unless-stopped
+    ports:
+      - "5005:5000"
+    volumes:
+      - /home/milos/McdQrcodes:/app/data
+    # Run Gunicorn with 1 worker on port 5000
+    command: gunicorn -w 1 -b 0.0.0.0:5000 app:app
+
+  worker:
+    image: mcd_qr
+    container_name: mcd_scanner_worker
+    restart: unless-stopped
+    volumes:
+      - /home/milos/McdQrcodes:/app/data
+    command: python worker.py

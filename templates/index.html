@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>McD Survey Scanner</title>
+    <style>
+        /* RESET & FULLSCREEN SETUP */
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: sans-serif; }
+
+        #video-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+
+        #guide-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none; display: flex; align-items: center; justify-content: center; }
+        .guide-box { width: 70vw; height: 70vw; max-width: 300px; max-height: 300px; border: 2px solid rgba(255, 255, 255, 0.6); border-radius: 12px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.5); position: relative; }
+        .guide-box::before, .guide-box::after { content: ''; position: absolute; width: 20px; height: 20px; border-color: #0f0; border-style: solid; border-width: 4px; }
+        .guide-box::before { top: -2px; left: -2px; border-right: 0; border-bottom: 0; }
+        .guide-box::after { bottom: -2px; right: -2px; border-left: 0; border-top: 0; }
+
+        .ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; }
+        .top-bar { width: 100%; pointer-events: auto; position: relative; height: 80px; }
+        #cooldown-container { width: 100%; height: 6px; background: rgba(255, 255, 255, 0.2); }
+        #cooldown-bar { width: 0%; height: 100%; background-color: #0f0; }
+
+        .icon-btn { position: absolute; top: 20px; background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.5); color: white; padding: 10px; border-radius: 50%; width: 45px; height: 45px; font-size: 1.2rem; cursor: pointer; backdrop-filter: blur(5px); display: flex; align-items: center; justify-content: center; z-index: 30; }
+        #settings-btn { right: 15px; }
+        #add-msg-btn { left: 15px; }
+        #logs-btn { left: 70px; }
+
+        #camera-select {
+            position: absolute; top: 25px; left: 50%; transform: translateX(-50%);
+            padding: 8px 15px; border-radius: 20px; background: rgba(0, 0, 0, 0.5);
+            color: white; border: 1px solid rgba(255, 255, 255, 0.5); backdrop-filter: blur(5px);
+            font-size: 0.9rem; outline: none; pointer-events: auto; z-index: 30; text-align: center;
+            appearance: none; -webkit-appearance: none;
+        }
+
+        .log-container { pointer-events: auto; padding: 20px; background: linear-gradient(to top, rgba(0,0,0,0.9), transparent); max-height: 25vh; overflow-y: auto; color: #fff; font-size: 0.9rem; width: 100%; box-sizing: border-box; }
+        .log-item { margin-bottom: 5px; opacity: 0.9; word-break: break-all; }
+        .log-item.success { color: #4caf50; font-weight: bold; }
+        .log-item.error { color: #ff5252; }
+        .timestamp { color: #aaa; font-size: 0.8em; margin-right: 8px; font-family: monospace; }
+
+        #flash-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 100; opacity: 0; pointer-events: none; transition: opacity 0.2s ease-out; }
+
+        /* MODALS */
+        .modal-overlay { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.95); z-index: 200; pointer-events: auto; flex-direction: column; justify-content: center; align-items: center; }
+        .modal-content { background: #222; padding: 20px; border-radius: 10px; width: 95%; max-width: 600px; height: 85vh; display: flex; flex-direction: column; border: 1px solid #444; color: white; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; flex-shrink: 0; }
+        .close-btn { background: none; border: none; color: #aaa; font-size: 1.5rem; cursor: pointer; }
+        .modal-scroll-area { flex-grow: 1; overflow-y: auto; padding-right: 5px; }
+
+        /* SETTINGS & FORMS */
+        .setting-group { margin-bottom: 15px; }
+        .setting-label { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 0.9rem; color: #ccc;}
+        input[type=range] { width: 100%; cursor: pointer; }
+        input[type=text] { width: 100%; padding: 10px; box-sizing: border-box; background: #333; color: white; border: 1px solid #555; border-radius: 4px; }
+        .checkbox-group { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .action-btn { width: 100%; padding: 12px; background: #0f0; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; color: black; margin-top: 10px; }
+        .cancel-btn { background: #555; color: white; margin-top: 5px; }
+
+        .msg-card { background: #333; padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid #444; display: flex; justify-content: space-between; align-items: center; }
+        .msg-info { font-size: 0.9rem; flex-grow: 1; padding-right: 10px; }
+        .msg-meta { font-size: 0.75rem; color: #aaa; display: flex; gap: 8px; }
+        .msg-tag { padding: 2px 6px; border-radius: 4px; background: #444; }
+        .msg-tag.enabled { color: #4caf50; }
+
+        /* DASHBOARD */
+        .stats-row { display: flex; gap: 8px; margin-bottom: 15px; }
+        .stat-card { flex: 1; background: #333; padding: 8px 5px; border-radius: 8px; text-align: center; border: 1px solid #444; }
+        .stat-val { display: block; font-size: 1.3rem; font-weight: bold; color: white; }
+        .stat-label { font-size: 0.7rem; color: #aaa; text-transform: uppercase; margin-top: 3px;}
+        .sc-scan .stat-val { color: #fff; }
+        .sc-ok .stat-val { color: #4caf50; }
+        .sc-pend .stat-val { color: #ff9800; }
+        .sc-err .stat-val { color: #f44336; }
+
+        .filters-row { display: flex; gap: 5px; margin-bottom: 10px; flex-wrap: wrap; }
+        .log-filter { background: #333; color: white; border: 1px solid #555; padding: 8px; border-radius: 4px; flex-grow: 1; font-size: 0.8rem; }
+        .time-filter { flex-basis: 100%; margin-bottom: 5px; background: #222; border-color: #0f0; color: #0f0; }
+
+        .log-table-container { overflow-x: auto; white-space: nowrap; }
+        table.log-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+        table.log-table th { text-align: left; padding: 8px; background: #444; color: #ccc; position: sticky; top: 0; z-index: 2; }
+        table.log-table td { padding: 8px; border-bottom: 1px solid #333; vertical-align: top; }
+
+        .col-code { min-width: 160px; max-width: 160px; white-space: normal; word-break: break-all; }
+        .col-status { min-width: 90px; max-width: 90px; white-space: nowrap; }
+        .col-error { min-width: 140px; max-width: 300px; white-space: normal; word-wrap: break-word; }
+        .col-time { min-width: 110px; white-space: nowrap; }
+
+        .status-badge { padding: 2px 5px; border-radius: 3px; font-size: 0.7rem; }
+        .bg-valid { background: #1b5e20; color: #a5d6a7; }
+        .bg-invalid { background: #b71c1c; color: #ffcdd2; }
+        .bg-pending { background: #f57f17; color: #fff9c4; }
+        .bg-done { background: #0d47a1; color: #bbdefb; }
+        .error-text { color: #ff5252; font-style: italic; }
+    </style>
+</head>
+<body>
+
+    <div id="flash-overlay"></div>
+
+    <div id="logs-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header"><h3>Logs & Stats</h3><button class="close-btn" onclick="toggleLogsModal()">×</button></div>
+            <div class="stats-row">
+                <div class="stat-card sc-scan"><span class="stat-val" id="stat-scanned">0</span><span class="stat-label">Scanned</span></div>
+                <div class="stat-card sc-ok"><span class="stat-val" id="stat-success">0</span><span class="stat-label">Success</span></div>
+                <div class="stat-card sc-pend"><span class="stat-val" id="stat-pending">0</span><span class="stat-label">Pending</span></div>
+                <div class="stat-card sc-err"><span class="stat-val" id="stat-errored">0</span><span class="stat-label">Error</span></div>
+            </div>
+            <div class="filters-row">
+                <select id="filter-time" class="log-filter time-filter" onchange="loadLogs()">
+                    <option value="today">Time: Today</option><option value="yesterday">Time: Yesterday</option><option value="this_shift">Time: This Shift</option><option value="last_shift">Time: Last Shift</option><option value="month">Time: This Month</option>
+                </select>
+                <select id="filter-valid" class="log-filter" onchange="applyLogFilters()">
+                    <option value="all">Valid: All</option><option value="1">Yes</option><option value="0">No</option>
+                </select>
+                <select id="filter-status" class="log-filter" onchange="applyLogFilters()">
+                    <option value="all">Status: All</option><option value="pending">Pending</option><option value="done">Done</option><option value="ignore">Ignored</option>
+                </select>
+                <select id="sort-by" class="log-filter" onchange="applyLogFilters()">
+                    <option value="scanned_desc">Newest</option><option value="scanned_asc">Oldest</option>
+                </select>
+            </div>
+            <div class="modal-scroll-area log-table-container">
+                <table class="log-table">
+                    <thead>
+                        <tr>
+                            <th class="col-code">Code</th>
+                            <th class="col-status">Status</th>
+                            <th class="col-error">Error</th>
+                            <th class="col-time">Date/Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-table-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="settings-modal" class="modal-overlay">
+        <div class="modal-content" style="height:auto;max-height:85vh;">
+            <div class="modal-header"><h3>Settings</h3><button class="close-btn" onclick="toggleSettings()">×</button></div>
+            <div class="modal-scroll-area">
+                <div style="color:#0f0;font-size:0.9rem;margin-bottom:10px;">BROWSER SCANNER</div>
+                <div class="setting-group"><div class="setting-label"><span>Interval</span><span id="val-scan-interval">500ms</span></div><input type="range" id="slider-scan-interval" min="250" max="2000" step="50" value="500"></div>
+                <div class="setting-group"><div class="setting-label"><span>Fail Cool</span><span id="val-error-cool">3000ms</span></div><input type="range" id="slider-error-cool" min="1000" max="5000" step="100" value="3000"></div>
+                <div class="setting-group"><div class="setting-label"><span>Valid Cool</span><span id="val-success-cool">3000ms</span></div><input type="range" id="slider-success-cool" min="1000" max="5000" step="100" value="3000"></div>
+
+                <div style="border-top:1px solid #444;margin:15px 0;padding-top:5px;color:#0f0;font-size:0.9rem;">WORKER CONFIG</div>
+                <div class="setting-group"><div class="setting-label"><span>Max Threads</span><span id="val-max-threads">3</span></div><input type="range" id="slider-max-threads" min="1" max="3" step="1" value="3"></div>
+
+                <div class="setting-group"><div class="setting-label"><span>Wait Between Questions</span><span id="val-delay-qs">2000ms</span></div><input type="range" id="slider-delay-qs" min="250" max="5000" step="250" value="2000"></div>
+                <div class="setting-group"><div class="setting-label"><span>Random Wait +</span><span id="val-delta-delay">0ms</span></div><input type="range" id="slider-delta-delay" min="0" max="800" step="50" value="0"></div>
+
+                <div class="setting-group"><div class="setting-label"><span>Wait Before Sending</span><span id="val-timeout">60s</span></div><input type="range" id="slider-timeout" min="5" max="120" step="5" value="60"></div>
+                <div class="setting-group"><div class="setting-label"><span>Random Send Wait +</span><span id="val-delta-timeout">0s</span></div><input type="range" id="slider-delta-timeout" min="0" max="60" step="1" value="0"></div>
+
+                <div style="border-top:1px solid #444;margin:15px 0;padding-top:5px;color:#0f0;font-size:0.9rem;">MESSAGE CHANCE</div>
+                <div class="setting-group"><div class="setting-label"><span>Standard %</span><span id="val-msg-perc">50%</span></div><input type="range" id="slider-msg-perc" min="0" max="100" value="50"></div>
+                <div class="setting-group"><div class="setting-label"><span>Special %</span><span id="val-spec-perc">10%</span></div><input type="range" id="slider-spec-perc" min="0" max="100" value="10"></div>
+
+                <button class="action-btn" onclick="saveSettings()">Save & Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="message-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header"><h3 id="msg-modal-title">Messages</h3><button class="close-btn" onclick="toggleMessageModal()">×</button></div>
+            <div style="flex-shrink:0;border-bottom:1px solid #444;padding-bottom:15px;margin-bottom:15px;">
+                <input type="hidden" id="edit-msg-id"><div class="setting-group"><input type="text" id="msg-text-input" placeholder="Message text..."></div>
+                <div style="display:flex;justify-content:space-between;"><div class="checkbox-group"><input type="checkbox" id="msg-reusable"><label for="msg-reusable">Reusable</label></div><div class="checkbox-group"><input type="checkbox" id="msg-enabled" checked><label for="msg-enabled">Enabled</label></div></div>
+                <button id="msg-submit-btn" class="action-btn" onclick="submitMessage()">Add</button>
+                <button id="msg-cancel-btn" class="action-btn cancel-btn" onclick="resetMsgForm()" style="display:none;">Cancel</button>
+            </div>
+            <div class="modal-scroll-area" id="msg-list-container"></div>
+        </div>
+    </div>
+
+    <div id="video-container"><video id="video" playsinline autoplay muted></video></div>
+    <div id="guide-layer"><div class="guide-box"></div></div>
+    <div class="ui-layer">
+        <div class="top-bar">
+            <div id="cooldown-container"><div id="cooldown-bar"></div></div>
+            <button id="add-msg-btn" class="icon-btn" onclick="toggleMessageModal()">📝</button>
+            <button id="logs-btn" class="icon-btn" onclick="toggleLogsModal()">📊</button>
+            <select id="camera-select"><option value="" disabled selected>Loading...</option></select>
+            <button id="settings-btn" class="icon-btn" onclick="toggleSettings()">⚙️</button>
+        </div>
+        <div class="log-container" id="result-log"><div style="opacity:0.5;text-align:center;">Scanning...</div></div>
+    </div>
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        const video = document.getElementById('video'); const canvas = document.getElementById('canvas'); const context = canvas.getContext('2d');
+        const logsModal = document.getElementById('logs-modal'); const settingsModal = document.getElementById('settings-modal'); const messageModal = document.getElementById('message-modal');
+        let scanIntervalTime=500, errorCooldown=3000, successCooldown=3000, isScanning=false, isPaused=false, scanInterval=null, currentStream=null, allLogs=[];
+
+        function toggleLogsModal() { const isVisible = logsModal.style.display === 'flex'; logsModal.style.display = isVisible ? 'none' : 'flex'; if (!isVisible) loadLogs(); }
+        function loadLogs() {
+            const timeFilter = document.getElementById('filter-time').value;
+            fetch(`/get_logs?time_filter=${timeFilter}`).then(r => r.json()).then(data => {
+                if(data.success) {
+                    document.getElementById('stat-scanned').innerText = data.stats.scanned;
+                    document.getElementById('stat-success').innerText = data.stats.success;
+                    document.getElementById('stat-pending').innerText = data.stats.pending;
+                    document.getElementById('stat-errored').innerText = data.stats.errored;
+                    allLogs = data.logs; applyLogFilters();
+                }
+            });
+        }
+        function applyLogFilters() {
+            const fValid=document.getElementById('filter-valid').value; const fStatus=document.getElementById('filter-status').value; const fSort=document.getElementById('sort-by').value;
+            let filtered = allLogs.filter(log => {
+                if (fValid !== 'all' && String(log.is_valid) !== fValid) return false;
+                const isProcessed = log.processing_successful !== null; const isValid = log.is_valid;
+                if (fStatus === 'pending' && (!isValid || isProcessed)) return false;
+                if (fStatus === 'done' && (!isValid || !isProcessed)) return false;
+                if (fStatus === 'ignore' && isValid) return false;
+                return true;
+            });
+            filtered.sort((a, b) => { const dA = new Date(a.scanned_time).getTime(); const dB = new Date(b.scanned_time).getTime(); return fSort === 'scanned_desc' ? dB - dA : dA - dB; });
+            const tbody = document.getElementById('logs-table-body'); tbody.innerHTML = '';
+            filtered.forEach(log => {
+                let code = log.code; if(code.includes('CODE=')) code = code.split('CODE=')[1];
+                let statHtml = ''; if(log.is_valid) statHtml = log.processing_successful === null ? '<span class="status-badge bg-pending">Pending</span>' : '<span class="status-badge bg-done">Done</span>'; else statHtml = '<span class="status-badge bg-invalid">Ignore</span>';
+                const dateObj = new Date(log.scanned_time); const dateStr = dateObj.toLocaleDateString([], {day:'2-digit', month:'2-digit'}); const timeStr = dateObj.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); const errorText = log.error ? `<span class="error-text">${log.error}</span>` : '-';
+                tbody.innerHTML += `<tr><td class="col-code">${code}</td><td class="col-status">${statHtml}</td><td class="col-error">${errorText}</td><td class="col-time">${dateStr} ${timeStr}</td></tr>`;
+            });
+        }
+
+        function toggleMessageModal() { const v=messageModal.style.display==='flex';messageModal.style.display=v?'none':'flex'; if(!v){resetMsgForm();loadMessages();} }
+        function loadMessages() { fetch('/get_messages').then(r=>r.json()).then(d=>{ const c=document.getElementById('msg-list-container'); c.innerHTML=''; d.messages.forEach(m=>{ c.innerHTML+=`<div class="msg-card"><div class="msg-info"><span style="font-weight:bold">${m.text}</span><div class="msg-meta"><span class="msg-tag ${m.enabled?'enabled':''}">${m.enabled?'On':'Off'}</span>${m.is_reusable?'<span>♻️</span>':''}</div></div><div><button class="action-btn" style="padding:5px;width:auto;margin:0 5px;" onclick='editMsg(${JSON.stringify(m)})'>Edit</button><button class="action-btn" style="padding:5px;width:auto;background:#f44336;color:white;" onclick="delMsg(${m.id})">Del</button></div></div>`; }); }); }
+        function submitMessage() { const id=document.getElementById('edit-msg-id').value; const t=document.getElementById('msg-text-input').value; if(!t)return; const u=id?`/update_message/${id}`:'/add_message'; const m=id?'PUT':'POST'; fetch(u,{method:m,headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t,is_reusable:document.getElementById('msg-reusable').checked,enabled:document.getElementById('msg-enabled').checked})}).then(()=>loadMessages()); }
+        function editMsg(m){ document.getElementById('edit-msg-id').value=m.id; document.getElementById('msg-text-input').value=m.text; document.getElementById('msg-reusable').checked=Boolean(m.is_reusable); document.getElementById('msg-enabled').checked=Boolean(m.enabled); document.getElementById('msg-submit-btn').innerText="Save"; document.getElementById('msg-cancel-btn').style.display="inline-block"; }
+        function delMsg(id){ if(confirm("Del?")) fetch(`/delete_message/${id}`,{method:'DELETE'}).then(()=>loadMessages()); }
+        function resetMsgForm(){ document.getElementById('edit-msg-id').value=''; document.getElementById('msg-text-input').value=''; document.getElementById('msg-submit-btn').innerText="Add"; document.getElementById('msg-cancel-btn').style.display="none"; }
+
+        function toggleSettings(){
+            const v=settingsModal.style.display==='flex';
+            if(!v) {
+                fetch('/settings').then(r=>r.json()).then(d=>{
+                    document.getElementById('slider-msg-perc').value=d.percent_message; document.getElementById('val-msg-perc').innerText=d.percent_message+'%';
+                    document.getElementById('slider-spec-perc').value=d.percent_special; document.getElementById('val-spec-perc').innerText=d.percent_special+'%';
+                    document.getElementById('slider-max-threads').value=d.max_threads || 3; document.getElementById('val-max-threads').innerText=d.max_threads || 3;
+                    document.getElementById('slider-delay-qs').value=d.time_between_questions_ms || 2000; document.getElementById('val-delay-qs').innerText=(d.time_between_questions_ms || 2000) + 'ms';
+                    document.getElementById('slider-timeout').value=d.end_time_s || 60; document.getElementById('val-timeout').innerText=(d.end_time_s || 60) + 's';
+                    document.getElementById('slider-delta-delay').value=d.random_delta_delay || 0; document.getElementById('val-delta-delay').innerText=(d.random_delta_delay || 0) + 'ms';
+                    document.getElementById('slider-delta-timeout').value=d.random_delta_timeout || 0; document.getElementById('val-delta-timeout').innerText=(d.random_delta_timeout || 0) + 's';
+
+                    // Fixed initial ms display
+                    document.getElementById('slider-scan-interval').value=d.scan_interval || 500; document.getElementById('val-scan-interval').innerText=(d.scan_interval || 500)+'ms';
+                    document.getElementById('slider-error-cool').value=d.error_cooldown || 3000; document.getElementById('val-error-cool').innerText=(d.error_cooldown || 3000)+'ms';
+                    document.getElementById('slider-success-cool').value=d.success_cooldown || 3000; document.getElementById('val-success-cool').innerText=(d.success_cooldown || 3000)+'ms';
+                });
+            }
+            settingsModal.style.display=v?'none':'flex';
+        }
+        function saveSettings(){
+            fetch('/settings',{ method:'POST', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({
+                    percent_message:document.getElementById('slider-msg-perc').value,
+                    percent_special:document.getElementById('slider-spec-perc').value,
+                    max_threads:document.getElementById('slider-max-threads').value,
+                    time_between_questions_ms:document.getElementById('slider-delay-qs').value,
+                    end_time_s:document.getElementById('slider-timeout').value,
+                    random_delta_delay:document.getElementById('slider-delta-delay').value,
+                    random_delta_timeout:document.getElementById('slider-delta-timeout').value
+                })
+            }).then(()=>toggleSettings());
+        }
+
+        // --- REAL-TIME UI UPDATES (oninput) ---
+        // Browser Settings - NOW IN MS
+        document.getElementById('slider-scan-interval').oninput=function(){scanIntervalTime=parseInt(this.value);document.getElementById('val-scan-interval').innerText=this.value+'ms';if(isScanning)startScanningLoop();}
+        document.getElementById('slider-error-cool').oninput=function(){errorCooldown=parseInt(this.value);document.getElementById('val-error-cool').innerText=this.value+'ms';}
+        document.getElementById('slider-success-cool').oninput=function(){successCooldown=parseInt(this.value);document.getElementById('val-success-cool').innerText=this.value+'ms';}
+
+        // Worker Settings
+        document.getElementById('slider-max-threads').oninput=function(){document.getElementById('val-max-threads').innerText=this.value;}
+        document.getElementById('slider-delay-qs').oninput=function(){document.getElementById('val-delay-qs').innerText=this.value+'ms';}
+        document.getElementById('slider-delta-delay').oninput=function(){document.getElementById('val-delta-delay').innerText=this.value+'ms';}
+        document.getElementById('slider-timeout').oninput=function(){document.getElementById('val-timeout').innerText=this.value+'s';}
+        document.getElementById('slider-delta-timeout').oninput=function(){document.getElementById('val-delta-timeout').innerText=this.value+'s';}
+
+        // Message Settings
+        document.getElementById('slider-msg-perc').oninput=function(){document.getElementById('val-msg-perc').innerText=this.value+'%';}
+        document.getElementById('slider-spec-perc').oninput=function(){document.getElementById('val-spec-perc').innerText=this.value+'%';}
+
+        async function initCamera() { try{await startCameraStream({facingMode:"environment"});await populateCameraList();}catch(e){} }
+        async function populateCameraList() { const d=await navigator.mediaDevices.enumerateDevices(); const s=document.getElementById('camera-select'); s.innerHTML=''; d.filter(x=>x.kind==='videoinput').forEach((x,i)=>{const o=document.createElement('option');o.value=x.deviceId;o.text=`Camera ${i+1}`;s.appendChild(o);}); s.onchange=()=>startCameraStream({deviceId:{exact:s.value}}); }
+        async function startCameraStream(c) { if(currentStream)currentStream.getTracks().forEach(t=>t.stop()); try{const s=await navigator.mediaDevices.getUserMedia({video:c});video.srcObject=s;currentStream=s;if(!isScanning){isScanning=true;startScanningLoop();}}catch(e){} }
+        function startScanningLoop() { if(scanInterval)clearInterval(scanInterval); scanInterval=setInterval(()=>{ if(isPaused||!isScanning||video.readyState!==video.HAVE_ENOUGH_DATA)return; if(settingsModal.style.display==='flex'||messageModal.style.display==='flex'||logsModal.style.display==='flex')return; isPaused=true; canvas.width=video.videoWidth;canvas.height=video.videoHeight; context.drawImage(video,0,0,canvas.width,canvas.height); fetch('/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:canvas.toDataURL('image/jpeg',0.5)})}).then(r=>r.json()).then(d=>{if(d.success)handleResult(d.data,d.is_valid,d.error);else isPaused=false;}).catch(()=>isPaused=false); }, scanIntervalTime); }
+        function handleResult(txt,v,err) {
+            const cd=v?successCooldown:errorCooldown; const overlay=document.getElementById('flash-overlay');overlay.style.backgroundColor=v?'rgba(0,255,0,0.6)':'rgba(255,0,0,0.6)';overlay.style.opacity=1;setTimeout(()=>overlay.style.opacity=0,300);
+            const bar=document.getElementById('cooldown-bar');bar.style.transition='none';bar.style.width='100%';bar.style.backgroundColor=v?'#0f0':'#f00';bar.offsetHeight;bar.style.transition=`width ${cd}ms linear`;bar.style.width='0%';
+            const lTxt=v?`CODE: ${txt.includes('CODE=')?txt.split('CODE=')[1]:txt}`:(err||"Invalid");
+            const div=document.createElement('div');div.className=`log-item ${v?'success':'error'}`;div.innerHTML=`<span class="timestamp">[${new Date().toLocaleTimeString([],{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}]</span> ${lTxt}`;document.getElementById('result-log').prepend(div);
+            setTimeout(()=>{isPaused=false;bar.style.width='0%';},cd);
+        }
+        initCamera();
+    </script>
+</body>
+</html>
