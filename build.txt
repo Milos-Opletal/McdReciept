@@ -1,0 +1,1 @@
+docker build -t mcd_qr . ; docker save -o mcd_qr.tar mcd_qr

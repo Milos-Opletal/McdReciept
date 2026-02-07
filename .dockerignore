@@ -1,6 +1,6 @@
 .git
 .idea
-venv
+.venv
 __pycache__
 *.pyc
 *.pyo
@@ -9,3 +9,4 @@ __pycache__
 scans.db
 *.tar
 *.yml
+build.txt
