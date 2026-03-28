@@ -2,11 +2,8 @@
 .idea
 .venv
 __pycache__
-*.pyc
-*.pyo
-*.pyd
-.DS_Store
-scans.db
 *.tar
-*.yml
 build.txt
+*.db
+*.sqlite
+db/*

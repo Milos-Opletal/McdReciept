@@ -10,7 +10,7 @@ from qreader import QReader
 app = Flask(__name__)
 reader = QReader(model_size='n')
 
-DB_NAME = "scans.db"
+DB_NAME = "db/scans.sqlite"
 TARGET_PREFIX = "https://mcdonalds.fast-insight.com/voc/cz/cs?CODE="
 
 

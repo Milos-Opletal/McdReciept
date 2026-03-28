@@ -5,10 +5,11 @@ import concurrent.futures
 import logging
 import datetime
 import os
-from playwright.sync_api import Playwright, sync_playwright, expect
+
+from playwright.sync_api import sync_playwright, expect
 
 # --- CONFIGURATION ---
-DB_FILE_PATH = "scans.db"  # Path to your database
+DB_FILE_PATH = "db/scans.sqlite"  # Path to your database
 POLL_INTERVAL = 5
 
 # Logging Setup
@@ -116,32 +117,67 @@ def get_message(percent_msg, percent_special):
         conn.close()
 
 
+def check_valid(page):
+    page_content = page.content()
+
+    if "Submit answers has failed" in page_content:
+        return False
+    return True
+
 # --- PROCESSING LOGIC ---
 def process_valid_code(code, delay_ms, delay_delta_ms, timeout_s, timeout_delta_s, message):
     """
     Main automation function using Playwright.
     Calculates random values internally.
     """
-    # 1. Calculate random values locally
-    used_delay_delta = random.randint(0, delay_delta_ms)
-    used_timeout_delta = random.randint(0, timeout_delta_s)
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        context = browser.new_context()
+        page = context.new_page()
+        page.goto(code)
+        try:
+            expect(page.get_by_role("heading", name="Začít  dotazník")).to_be_visible(timeout=10000)
+        except:
+            pass
+        if not check_valid(page):
+            raise Exception("Code already used")
+        try:
+            page.locator("[id=\"62\"]").get_by_text("Ne", exact=True).click(timeout=7000)
+        except:
+            pass
 
-    actual_delay = delay_ms + used_delay_delta
-    actual_timeout = timeout_s + used_timeout_delta
+        time.sleep((delay_ms + random.randint(0, delay_delta_ms)) / 1000)
+        page.locator("[id=\"0\"]").get_by_text("😀 Velmi spokojeni").click()
+        time.sleep((delay_ms + random.randint(0, delay_delta_ms)) / 1000)
+        page.locator("[id=\"6\"]").get_by_text("😀 Velmi spokojeni").click()
+        time.sleep((delay_ms + random.randint(0, delay_delta_ms)) / 1000)
+        page.locator("[id=\"8\"]").get_by_text("😀 Velmi spokojeni").click()
+        time.sleep((delay_ms + random.randint(0, delay_delta_ms)) / 1000)
+        page.locator("[id=\"10\"]").get_by_text("👍🏻 Ano").click()
+        time.sleep((delay_ms + random.randint(0, delay_delta_ms)) / 1000)
+        page.locator("[id=\"12\"]").get_by_text("😀 Velmi spokojeni").click()
+        time.sleep((delay_ms + random.randint(0, delay_delta_ms)) / 1000)
+        page.locator("[id=\"14\"]").get_by_text("😀 Velmi spokojeni").click()
+        time.sleep((delay_ms + random.randint(0, delay_delta_ms)) / 1000)
+        page.locator("[id=\"49\"]").get_by_text("Ano").click()
+        time.sleep((delay_ms + random.randint(0, delay_delta_ms)) / 1000)
+        page.locator("[id=\"59\"]").get_by_text("Ne").click()
+        time.sleep((delay_ms + random.randint(0, delay_delta_ms)) / 1000)
+        page.get_by_text("U výdejového pultu").click()
+        time.sleep((delay_ms + random.randint(0, delay_delta_ms)) / 1000)
+        page.locator("[id=\"35\"]").get_by_text("😀 10: Určitě doporučím").click()
+        time.sleep((delay_ms + random.randint(0, delay_delta_ms)) / 1000)
+        page.locator("input[name=\"sbj_1000809[]\"]").click()
+        time.sleep((delay_ms + random.randint(0, delay_delta_ms)) / 1000)
+        page.locator("input[name=\"sbj_1000809[]\"]").fill(message)
 
-    # ----------------------------------------------------
-    # PLAYWRIGHT AUTOMATION LOGIC GOES HERE
-    # ----------------------------------------------------
-    # Example structure:
-    # with sync_playwright() as p:
-    #     browser = p.chromium.launch(headless=True)
-    #     page = browser.new_page()
-    #     # ... actions ...
-    #     browser.close()
+        time.sleep(timeout_s +  random.randint(0, timeout_delta_s))
+        page.get_by_role("button", name="Poslat").click()
+        expect(page.locator("h2")).to_contain_text("Děkujeme za VÁŠ NÁZOR")
 
-    # Simulation
-    time.sleep(random.uniform(1.0, 3.0))
-    return True
+        context.close()
+        browser.close()
+        return True
 
 
 def worker_task(scan_id, code):

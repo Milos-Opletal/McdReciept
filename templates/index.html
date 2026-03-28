@@ -83,7 +83,8 @@
 
                 <div class="setting-group"><div class="setting-label"><span>Wait Between Questions</span><span id="val-delay-qs">2000ms</span></div><input type="range" id="slider-delay-qs" min="250" max="5000" step="250" value="2000"></div>
                 <div class="setting-group"><div class="setting-label"><span>Random Wait +</span><span id="val-delta-delay">0ms</span></div><input type="range" id="slider-delta-delay" min="0" max="800" step="50" value="0"></div>
-                <div class="setting-group"><div class="setting-label"><span>Wait Before Sending</span><span id="val-timeout">60s</span></div><input type="range" id="slider-timeout" min="5" max="120" step="5" value="60"></div>
+
+                <div class="setting-group"><div class="setting-label"><span>Wait Before Sending</span><span id="val-timeout">60s</span></div><input type="range" id="slider-timeout" min="30" max="300" step="5" value="60"></div>
                 <div class="setting-group"><div class="setting-label"><span>Random Send Wait +</span><span id="val-delta-timeout">0s</span></div><input type="range" id="slider-delta-timeout" min="0" max="60" step="1" value="0"></div>
 
                 <div style="border-top:1px solid #444;margin:15px 0;padding-top:5px;color:#0f0;font-size:0.9rem;">MESSAGE CHANCE</div>
@@ -106,7 +107,11 @@
             </div>
             <div class="filters-row">
                 <select id="filter-time" class="log-filter time-filter" onchange="loadLogs()">
-                    <option value="today">Time: Today</option><option value="yesterday">Time: Yesterday</option><option value="this_shift">Time: This Shift</option><option value="last_shift">Time: Last Shift</option><option value="month">Time: This Month</option>
+                    <option value="this_shift" selected>Time: This Shift</option>
+                    <option value="today">Time: Today</option>
+                    <option value="yesterday">Time: Yesterday</option>
+                    <option value="last_shift">Time: Last Shift</option>
+                    <option value="month">Time: This Month</option>
                 </select>
                 <select id="filter-valid" class="log-filter" onchange="applyLogFilters()">
                     <option value="all">Valid: All</option><option value="1">Yes</option><option value="0">No</option>
