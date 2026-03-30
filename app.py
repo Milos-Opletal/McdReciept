@@ -25,8 +25,16 @@ def init_db():
                           is_valid              BOOLEAN,
                           processed_time        TIMESTAMP,
                           processing_successful BOOLEAN,
-                          error                 TEXT
+                          error                 TEXT,
+                          message               TEXT
                       )''')
+
+    # Migration: Add new column 'message' to 'scans' if missing
+    cursor.execute("PRAGMA table_info(scans)")
+    scans_cols = [c[1] for c in cursor.fetchall()]
+    if 'message' not in scans_cols:
+        cursor.execute("ALTER TABLE scans ADD COLUMN message TEXT")
+
     cursor.execute('''CREATE TABLE IF NOT EXISTS messages
                       (
                           id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,13 +69,11 @@ def init_db():
                                      end_time_s, random_delta_delay, random_delta_timeout, scan_interval, error_cooldown, success_cooldown)
                           VALUES (1, 50, 10, 3, 2000, 60, 0, 0, 500, 3000, 3000)''')
     else:
-        # Migration: Add new columns if missing
         cursor.execute("PRAGMA table_info(settings)")
         cols = [c[1] for c in cursor.fetchall()]
         if 'scan_interval' not in cols: cursor.execute("ALTER TABLE settings ADD COLUMN scan_interval INTEGER DEFAULT 500")
         if 'error_cooldown' not in cols: cursor.execute("ALTER TABLE settings ADD COLUMN error_cooldown INTEGER DEFAULT 3000")
         if 'success_cooldown' not in cols: cursor.execute("ALTER TABLE settings ADD COLUMN success_cooldown INTEGER DEFAULT 3000")
-        # Ensure previous columns exist too (just in case)
         if 'max_threads' not in cols: cursor.execute("ALTER TABLE settings ADD COLUMN max_threads INTEGER DEFAULT 3")
 
     conn.commit()
@@ -75,7 +81,6 @@ def init_db():
 
 init_db()
 
-# --- HELPER: TIME RANGES ---
 def get_shift_bounds(dt):
     h = dt.hour; date_part = dt.date()
     if 6 <= h < 14: return datetime.datetime.combine(date_part, datetime.time(6,0)), datetime.datetime.combine(date_part, datetime.time(13,59,59))
@@ -92,7 +97,6 @@ def get_time_range(filter_type):
     elif filter_type == 'yesterday': y = now - timedelta(days=1); return y.replace(hour=0,minute=0,second=0), y.replace(hour=23,minute=59,second=59)
     else: return now.replace(hour=0,minute=0,second=0), now.replace(hour=23,minute=59,second=59)
 
-# --- CORE FUNCTIONS ---
 def decode_image(image_data):
     try:
         encoded_data = image_data.split(',')[1] if ',' in image_data else image_data
@@ -119,23 +123,56 @@ def save_scan_to_db(code, is_valid, error_msg):
         conn.close()
     except: pass
 
-# --- ROUTES ---
+
 @app.route('/')
 def index(): return render_template('index.html')
 
+
 @app.route('/scan', methods=['POST'])
 def scan():
-    data = request.json; img_data = data.get('image')
+    data = request.json
+    img_data = data.get('image')
+    manual_mode = data.get('manual_mode', False)
+
     if not img_data: return jsonify({'error': 'No image'}), 400
+
     decoded = decode_image(img_data)
     if decoded:
         is_valid = False; err = None
         if not decoded.startswith(TARGET_PREFIX): err = "Invalid Prefix"
         elif check_if_exists(decoded): err = "Duplicate Code"
         else: is_valid = True
+
+        # If in manual mode and valid code found, pause and prompt user. Do not save to DB yet.
+        if is_valid and manual_mode:
+            return jsonify({'success': True, 'data': decoded, 'is_valid': True, 'needs_manual': True})
+
+        # Standard flow or invalid code flow
         save_scan_to_db(decoded, is_valid, err)
-        return jsonify({'success': True, 'data': decoded, 'is_valid': is_valid, 'error': err})
+        return jsonify({'success': True, 'data': decoded, 'is_valid': is_valid, 'error': err, 'needs_manual': False})
+
     return jsonify({'success': False})
+
+
+@app.route('/save_manual_scan', methods=['POST'])
+def save_manual_scan():
+    """Endpoint for saving a code AFTER the user has manually entered a message."""
+    data = request.json
+    code = data.get('code')
+    msg = data.get('message', '')
+
+    if not code: return jsonify({'success': False, 'error': 'Missing code'})
+    if check_if_exists(code): return jsonify({'success': False, 'error': 'Duplicate Code'})
+
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.execute('INSERT INTO scans (code, scanned_time, is_valid, message) VALUES (?, ?, 1, ?)', (code, datetime.datetime.now(), msg))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 
 @app.route('/get_logs', methods=['GET'])
 def get_logs():
@@ -159,7 +196,6 @@ def handle_settings():
     if request.method == 'GET':
         row = conn.execute('SELECT * FROM settings WHERE id = 1').fetchone()
         conn.close()
-        # Fallback defaults if new columns are None (migration safety)
         d = dict(row)
         return jsonify(d)
 
@@ -168,10 +204,10 @@ def handle_settings():
                                         percent_message=?, percent_special=?, max_threads=?, time_between_questions_ms=?, end_time_s=?, random_delta_delay=?, random_delta_timeout=?,
                                         scan_interval=?, error_cooldown=?, success_cooldown=?
                     WHERE id = 1''', (
-                     d['percent_message'], d['percent_special'], d.get('max_threads', 3),
-                     d.get('time_between_questions_ms', 2000), d.get('end_time_s', 60),
-                     d.get('random_delta_delay', 0), d.get('random_delta_timeout', 0),
-                     d.get('scan_interval', 500), d.get('error_cooldown', 3000), d.get('success_cooldown', 3000)
+        d['percent_message'], d['percent_special'], d.get('max_threads', 3),
+        d.get('time_between_questions_ms', 2000), d.get('end_time_s', 60),
+        d.get('random_delta_delay', 0), d.get('random_delta_timeout', 0),
+        d.get('scan_interval', 500), d.get('error_cooldown', 3000), d.get('success_cooldown', 3000)
                  ))
     conn.commit(); conn.close()
     return jsonify({'success': True})

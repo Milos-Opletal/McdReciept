@@ -31,7 +31,6 @@ def ensure_settings_column():
         cursor.execute("PRAGMA table_info(settings)")
         columns = [r['name'] for r in cursor.fetchall()]
 
-        # Add missing columns safely
         if 'max_threads' not in columns:
             cursor.execute("ALTER TABLE settings ADD COLUMN max_threads INTEGER DEFAULT 3")
         if 'time_between_questions_ms' not in columns:
@@ -99,7 +98,7 @@ def get_message(percent_msg, percent_special):
                 conn.execute("UPDATE messages SET enabled = 0 WHERE id = ?", (disable_id,))
                 conn.commit()
             else:
-                is_special = False  # Fallback
+                is_special = False
 
         if not is_special:
             cursor.execute("SELECT * FROM messages WHERE is_reusable = 1 AND enabled = 1 ORDER BY RANDOM() LIMIT 1")
@@ -119,17 +118,12 @@ def get_message(percent_msg, percent_special):
 
 def check_valid(page):
     page_content = page.content()
-
     if "Submit answers has failed" in page_content:
         return False
     return True
 
-# --- PROCESSING LOGIC ---
+
 def process_valid_code(code, delay_ms, delay_delta_ms, timeout_s, timeout_delta_s, message):
-    """
-    Main automation function using Playwright.
-    Calculates random values internally.
-    """
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         context = browser.new_context()
@@ -181,23 +175,26 @@ def process_valid_code(code, delay_ms, delay_delta_ms, timeout_s, timeout_delta_
 
 
 def worker_task(scan_id, code):
-    """
-    Refetches settings, processes code, and logs result.
-    """
     try:
-        # 1. REFETCH SETTINGS
         settings = get_settings()
 
-        # 2. GET MESSAGE
-        msg_text, _ = get_message(settings['percent_message'], settings['percent_special'])
+        # Check if a manual message was provided
+        conn = get_db_connection()
+        row = conn.execute("SELECT message FROM scans WHERE id = ?", (scan_id,)).fetchone()
+        conn.close()
+
+        existing_msg = row['message'] if row and 'message' in row.keys() else None
+
+        if existing_msg is not None:
+            msg_text = existing_msg  # Use the user's manual message
+        else:
+            msg_text, _ = get_message(settings['percent_message'], settings['percent_special'])  # Auto generated
 
         success = False
         error_msg = None
 
-        # Minimal Start Log
         logging.info(f"START {code}")
 
-        # 3. RUN PROCESS (Passed raw config values)
         try:
             success = process_valid_code(
                 code,
@@ -212,19 +209,19 @@ def worker_task(scan_id, code):
             error_msg = f"worker error:{str(process_error)}"
             logging.error(f"FAILED {code} | Error: {process_error}")
 
-        # 4. UPDATE DB
+        # Update DB
         conn = get_db_connection()
         conn.execute("""
                      UPDATE scans
                      SET processed_time        = ?,
                          processing_successful = ?,
-                         error                 = ?
+                         error                 = ?,
+                         message               = ?
                      WHERE id = ?
-                     """, (datetime.datetime.now(), success, error_msg, scan_id))
+                     """, (datetime.datetime.now(), success, error_msg, msg_text, scan_id))
         conn.commit()
         conn.close()
 
-        # Compact Success Log (Logs the Range Config since exact delta is internal)
         if success:
             msg_status = f"Msg: '{msg_text}'" if msg_text else "No Msg"
             logging.info(
@@ -250,10 +247,8 @@ def main():
             if pending_count > 0:
                 settings = get_settings()
 
-                # Logic: 1 thread per 10 codes, clamped by max_threads (Range 1-5)
-                calc_threads = (pending_count // 10) + 1
-                max_threads = max(1, min(5, settings['max_threads']))
-                num_threads = min(calc_threads, max_threads)
+                max_threads_setting = max(1, min(5, settings['max_threads']))
+                num_threads = min(pending_count, max_threads_setting)
 
                 logging.info(f"Pending: {pending_count} | Threads: {num_threads}")
 
@@ -268,7 +263,6 @@ def main():
         except Exception as e:
             logging.error(f"Loop error: {e}")
             time.sleep(5)
-
 
 if __name__ == "__main__":
     main()
