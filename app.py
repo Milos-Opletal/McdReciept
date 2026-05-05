@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import sqlite3
 import datetime
+import os
 from datetime import timedelta
 from flask import Flask, render_template, request, jsonify
 from qreader import QReader
@@ -15,6 +16,7 @@ TARGET_PREFIX = "https://mcdonalds.fast-insight.com/voc/cz/cs?CODE="
 
 
 def init_db():
+    os.makedirs(os.path.dirname(DB_NAME), exist_ok=True)
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''CREATE TABLE IF NOT EXISTS scans

@@ -9,7 +9,7 @@ services:
     ports:
       - "5005:5000"
     volumes:
-      - /home/milos/McdQrcodes:/app/data
+      - /home/milos/McdQrcodes:/app/db
     # Run Gunicorn with 1 worker on port 5000
     command: gunicorn -w 1 -b 0.0.0.0:5000 app:app
 
@@ -19,5 +19,5 @@ services:
     container_name: mcd_scanner_worker
     restart: unless-stopped
     volumes:
-      - /home/milos/McdQrcodes:/app/data
+      - /home/milos/McdQrcodes:/app/db
     command: python worker.py
