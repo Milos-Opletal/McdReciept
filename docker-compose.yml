@@ -3,20 +3,19 @@ version: '3.8'
 services:
   web:
     build: .
-    image: mcd_reciept
-    container_name: mcd_reciept_web
+    image: mcd-reciept
+    container_name: mcd-reciept-web
     restart: unless-stopped
     ports:
       - "5005:5000"
     volumes:
       - /home/milos/McdQrcodes:/app/db
-    # Run Gunicorn with 1 worker on port 5000
-    command: gunicorn -w 1 -b 0.0.0.0:5000 app:app
+    command: gunicorn --workers 1 --threads 1 --timeout 60 -b 0.0.0.0:5000 app:app
 
   worker:
     build: .
-    image: mcd_reciept
-    container_name: mcd_reciept_worker
+    image: mcd-reciept
+    container_name: mcd-reciept-worker
     restart: unless-stopped
     volumes:
       - /home/milos/McdQrcodes:/app/db
