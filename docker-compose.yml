@@ -3,8 +3,8 @@ version: '3.8'
 services:
   web:
     build: .
-    image: mcd_qr
-    container_name: mcd_scanner_web
+    image: mcd_reciept
+    container_name: mcd_reciept_web
     restart: unless-stopped
     ports:
       - "5005:5000"
@@ -15,8 +15,8 @@ services:
 
   worker:
     build: .
-    image: mcd_qr
-    container_name: mcd_scanner_worker
+    image: mcd_reciept
+    container_name: mcd_reciept_worker
     restart: unless-stopped
     volumes:
       - /home/milos/McdQrcodes:/app/db
